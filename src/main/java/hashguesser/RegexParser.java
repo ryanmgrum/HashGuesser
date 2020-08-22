@@ -179,6 +179,7 @@ class RegexParser {
     
     
     private void brace(Integer i, String expression, LinkedList<RegexChunk> list) throws PatternSyntaxException {
+        BigInteger min = ZERO, max = ZERO;
         
     }
     
@@ -210,10 +211,14 @@ class RegexParser {
         private char letter;
         private BigInteger minimumNumberToFetch;
         private BigInteger maximumNumberToFetch;
-        private final LinkedList<Character> sequence;
+        private LinkedList<Character> sequence;
+        private RegexChunk next;
+        private LinkedList<RegexChunk> peers;
         
         protected RegexChunk() {
             sequence = new LinkedList<>();
+            next = null;
+            peers = new LinkedList<>();
             minimumNumberToFetch = ZERO;
             maximumNumberToFetch = ZERO;
         }
@@ -221,36 +226,85 @@ class RegexParser {
         protected RegexChunk(Character ch) {
             letter = ch;
             sequence = null;
+            next = null;
+            peers = null;
             minimumNumberToFetch = ZERO;
             maximumNumberToFetch = ZERO;
         }
         
-        protected RegexChunk(LinkedList<Character> characters) {
-            sequence = characters;
+        protected RegexChunk(RegexChunk nextChunkChain) {
+            sequence = null;
+            next = nextChunkChain;
+            peers = null;
             minimumNumberToFetch = ZERO;
             maximumNumberToFetch = ZERO;
         }
         
-        protected void setNumberToFetch(BigInteger min) {
-            if (min.compareTo(ZERO) > 0)
-                minimumNumberToFetch = min;
+        protected RegexChunk(LinkedList charactersOrPeer) {
+            if (charactersOrPeer.get(0) instanceof Character)
+                sequence = charactersOrPeer;
+            else
+                sequence = null;
+            if (charactersOrPeer.get(0) instanceof RegexChunk)
+                peers = charactersOrPeer;
+            else
+                peers = null;
+            minimumNumberToFetch = ZERO;
+            maximumNumberToFetch = ZERO;
         }
         
-        protected void setNumberToFetch(BigInteger min, BigInteger max) {
-            if (min.compareTo(ZERO) > 0)
-                if (max.compareTo(min) > 0) {
-                    minimumNumberToFetch = min;
-                    maximumNumberToFetch = max;
+        
+        protected void setMaximumNumberToFetch(BigInteger max) {
+            if (max != null)
+                if (max.compareTo(ZERO) > 0)
+                    minimumNumberToFetch = max;
+        }
+        
+        protected void setMinMaxNumberToFetch(BigInteger min, BigInteger max) {
+            if (min != null && max != null)
+                if (min.compareTo(ZERO) > 0 && max.compareTo(min) > 0) {
+                        minimumNumberToFetch = min;
+                        maximumNumberToFetch = max;
                 }
         }
         
+        protected void setNext(RegexChunk nextChunk) {
+            next = nextChunk;
+        }
+        
+        protected RegexChunk getNext() {
+            return next;
+        }
+        
         protected void addCharacter(char c) {
+            if (sequence == null)
+                sequence = new LinkedList<>();
             sequence.add(c);
         }
         
+        protected char getCharacter() {
+            return letter;
+        }
+        
         protected void addSequence(LinkedList<Character> chars) {
+            if (sequence == null)
+                sequence = new LinkedList<>();
             for (Character chara : chars)
                 sequence.add(chara);
+        }
+        
+        protected LinkedList<Character> getSequence() {
+            return sequence;
+        }
+        
+        protected void addPeer(RegexChunk peer) {
+            if (peers == null)
+                peers = new LinkedList<>();
+            peers.add(peer);
+        }
+        
+        protected LinkedList<RegexChunk> getPeers() {
+            return peers;
         }
     }
 }
