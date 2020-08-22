@@ -13,7 +13,7 @@ import java.util.Stack;
  */
 class RegexParser {
     private final Generex stringGenerator;
-    private final LinkedList<LinkedList<RegexChunk>> parsedRegex;
+    private final RegexChunk parsedRegex; // The head of the linked list of parsed regex.
     private final Stack<Character> openSymbols;
     
     /** First define the syntax for parsing a (limited) regular expression for generating candidates:
@@ -40,61 +40,73 @@ class RegexParser {
     
     
     private void parseRegex(String expression) throws PatternSyntaxException {
-        parsedRegex.clear();
-        int state = 0, priorState = 0; // 0 = literal, 1 = parenthesis, 2 = bracket, 3 = braces, 4 = range, 5 = multiDigit
+        parsedRegex.reset();
+        RegexChunk chunk = new RegexChunk();
+        parsedRegex.setNext(chunk);
         for (Integer i = 0; i < expression.length(); i++) {
             char c = expression.charAt(i);
             switch(c) {
                 case '(' -> {
                     openSymbols.push(expression.charAt(i));
                     LinkedList<RegexChunk> list = new LinkedList<>();
-                    parenthesis(++i, expression, list);
+                    parenthesis(++i, expression);
                 }
                 case '[' -> {
-                    priorState = state;
-                    state = 2;
+                    bracket(++i, expression);
                 }
                 case '{' -> {
-                    priorState = state;
-                    state = 3;
+                    brace(++i, expression, chunk);
                 }
                 default -> {
-                    LinkedList<RegexChunk> list = new LinkedList<>();
                     RegexChunk chk = new RegexChunk(expression.charAt(i));
-                    list.add(chk);
-                    parsedRegex.add(list);
+                    chunk.setNext(chk);
+                    chunk = chunk.next();
                 }
             }
         }
     }
     
     
-    private void parenthesis(Integer i, String expression, LinkedList<RegexChunk> list) throws PatternSyntaxException {
+    private RegexChunk parenthesis(Integer i, String expression) throws PatternSyntaxException {
+        RegexChunk result = new RegexChunk();
         RegexChunk chunk = new RegexChunk();
+        result.addPeer(chunk);
+        boolean popped = false;
         for (; i < expression.length(); i++) {
             char c = expression.charAt(i);
             switch(c) {
                 case '|' -> {
-                    list.add(chunk);
-                    chunk = new RegexChunk();
+                    RegexChunk chk = new RegexChunk();
+                    chunk.setNext(chk);
+                    chunk = chunk.next();
                 }
                 case '}' -> throw new PatternSyntaxException("Error parsing regex: unescaped closing brace found inside parenthesis.", expression, i);
                 case ']' -> throw new PatternSyntaxException("Error parsing regex: unescaped closing bracket found inside parenthesis.", expression, i);
                 case '[' -> {
                     openSymbols.push(expression.charAt(i));
-                    bracket(++i, expression, list);
+                    chunk.addSequence(bracket(++i, expression));
                 }
                 case '{' -> {
                     openSymbols.push(expression.charAt(i));
-                    brace(++i, expression, list);
+                    brace(++i, expression, chunk);
+                }
+                case ')' -> {
+                    popped = true;
+                    openSymbols.pop();
+                    i++;
+                    break;
                 }
             }
         }
+        if (!popped)
+            throw new PatternSyntaxException("Error parsing regex: no closing parenthesis found.", expression, i);
+        else
+            return result;
     }
     
     // This is where ranges come into play.
-    private void bracket(Integer i, String expression, LinkedList<RegexChunk> list) throws PatternSyntaxException {
-        RegexChunk result = new RegexChunk();
+    private LinkedList<Character> bracket(Integer i, String expression) throws PatternSyntaxException {
+        LinkedList<Character> result = new LinkedList<>();
         boolean popped = false;
         for(; i < expression.length(); i++) {
             char c = expression.charAt(i);
@@ -105,17 +117,17 @@ class RegexParser {
                         if (Arrays.binarySearch(numbers, upper) >= 0) { // Check whether the other end of the range is also a number.
                             if (upper > c)
                                 for (; c <= upper; c++)
-                                    result.addCharacter(c);
+                                    result.add(c);
                             else
                                 for (; c >= upper; c--)
-                                    result.addCharacter(c);
+                                    result.add(c);
                             i = i + 2;
                         } else
                             throw new PatternSyntaxException("Error parsing regex: unknown range (numbers, lowercase letters, or uppercase letters).", expression, i);
                     } else // Not a sequence, add the number.
-                        result.addCharacter(c);
+                        result.add(c);
                 } else if (i+1 < expression.length()) // Last number in bracket or just a single character, add.
-                    result.addCharacter(c);
+                    result.add(c);
                 else // we are at the end of the expression inside a bracket, error.
                     throw new PatternSyntaxException("Error parsing regex: no closing bracket found.", expression, i);                    
             } else if (Arrays.binarySearch(lowercaseLetters, c) >= 0) { // Is it a lowercase letter?
@@ -125,17 +137,17 @@ class RegexParser {
                         if (Arrays.binarySearch(lowercaseLetters, upper) >= 0) { // Check whether the other end of the range is also a letter.
                             if (upper > c)
                                 for (; c <= upper; c++)
-                                    result.addCharacter(c);
+                                    result.add(c);
                             else
                                 for (; c >= upper; c--)
-                                    result.addCharacter(c);
+                                    result.add(c);
                             i = i + 2;
                         } else
                             throw new PatternSyntaxException("Error parsing regex: unknown range (numbers, lowercase letters, or uppercase letters).", expression, i);
                     } else // Not a sequence, add the letter.
-                        result.addCharacter(c);
+                        result.add(c);
                 } else if (i+1 < expression.length()) // Last letter in bracket or just a single character, add.
-                    result.addCharacter(c);
+                    result.add(c);
                 else // we are at the end of the expression inside a bracket, error.
                     throw new PatternSyntaxException("Error parsing regex: no closing bracket found.", expression, i);                    
             } else if (Arrays.binarySearch(uppercaseLetters, c) >= 0) { // Is it an uppercase letter?
@@ -145,17 +157,17 @@ class RegexParser {
                         if (Arrays.binarySearch(uppercaseLetters, upper) >= 0) { // Check whether the other end of the range is also a letter.
                             if (upper > c)
                                 for (; c <= upper; c++)
-                                    result.addCharacter(c);
+                                    result.add(c);
                             else
                                 for (; c >= upper; c--)
-                                    result.addCharacter(c);
+                                    result.add(c);
                             i = i + 2;
                         } else
                             throw new PatternSyntaxException("Error parsing regex: unknown range (numbers, lowercase letters, or uppercase letters).", expression, i);
                     } else // Not a sequence, add the letter.
-                        result.addCharacter(c);
+                        result.add(c);
                 } else if (i+1 < expression.length()) // Last letter in bracket or just a single character, add.
-                    result.addCharacter(c);
+                    result.add(c);
                 else // we are at the end of the expression inside a bracket, error.
                     throw new PatternSyntaxException("Error parsing regex: no closing bracket found.", expression, i);                    
             } else if (Arrays.binarySearch(symbols, c) >= 0) { // Is it a symbol?
@@ -168,24 +180,24 @@ class RegexParser {
                     } else
                         throw new PatternSyntaxException("Error parsing regex: no matching opening bracket found.", expression, i);
                 } else // Arbitrary symbol, add it to parsed.
-                    result.addCharacter(c);
+                    result.add(c);
             }
         }
         if (!popped)
             throw new PatternSyntaxException("Error parsing regex: no closing bracket found.", expression, i);
         else
-            list.add(result);
+            return result;
     }
     
     
-    private void brace(Integer i, String expression, LinkedList<RegexChunk> list) throws PatternSyntaxException {
+    private void brace(Integer i, String expression, RegexChunk chunk) throws PatternSyntaxException {
         BigInteger min = ZERO, max = ZERO;
         
     }
     
     
     RegexParser(String newRegex) throws PatternSyntaxException {
-        parsedRegex = new LinkedList<>();
+        parsedRegex = new RegexChunk();
         openSymbols = new Stack<>();
         stringGenerator = new Generex(newRegex, new Random());
     }
@@ -272,7 +284,11 @@ class RegexParser {
             next = nextChunk;
         }
         
-        protected RegexChunk getNext() {
+        protected boolean hasNext() {
+            return next != null;
+        }
+        
+        protected RegexChunk next() {
             return next;
         }
         
@@ -305,6 +321,12 @@ class RegexParser {
         
         protected LinkedList<RegexChunk> getPeers() {
             return peers;
+        }
+        
+        protected void reset() {
+            if (peers != null)
+                peers.clear();
+            next = null;
         }
     }
 }
