@@ -4,6 +4,7 @@ import com.mifmif.common.regex.Generex;
 import java.math.BigInteger;
 import java.util.regex.PatternSyntaxException;
 import static java.math.BigInteger.ZERO;
+import static java.math.BigInteger.TEN;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.Random;
@@ -14,7 +15,6 @@ import java.util.Stack;
 class RegexParser {
     private final Generex stringGenerator;
     private final RegexChunk parsedRegex; // The head of the linked list of parsed regex.
-    private final Stack<Character> openSymbols;
     
     /** First define the syntax for parsing a (limited) regular expression for generating candidates:
      *  <program> -> <expression>
@@ -47,8 +47,6 @@ class RegexParser {
             char c = expression.charAt(i);
             switch(c) {
                 case '(' -> {
-                    openSymbols.push(expression.charAt(i));
-                    LinkedList<RegexChunk> list = new LinkedList<>();
                     parenthesis(++i, expression);
                 }
                 case '[' -> {
@@ -83,16 +81,13 @@ class RegexParser {
                 case '}' -> throw new PatternSyntaxException("Error parsing regex: unescaped closing brace found inside parenthesis.", expression, i);
                 case ']' -> throw new PatternSyntaxException("Error parsing regex: unescaped closing bracket found inside parenthesis.", expression, i);
                 case '[' -> {
-                    openSymbols.push(expression.charAt(i));
                     chunk.addSequence(bracket(++i, expression));
                 }
                 case '{' -> {
-                    openSymbols.push(expression.charAt(i));
                     brace(++i, expression, chunk);
                 }
                 case ')' -> {
                     popped = true;
-                    openSymbols.pop();
                     i++;
                     break;
                 }
@@ -172,16 +167,13 @@ class RegexParser {
                     throw new PatternSyntaxException("Error parsing regex: no closing bracket found.", expression, i);                    
             } else if (Arrays.binarySearch(symbols, c) >= 0) { // Is it a symbol?
                 if (c == ']') { // Exit
-                    if (openSymbols.peek() == '[') {
-                        openSymbols.pop();
-                        popped = true;
-                        i += 1;
-                        break;
-                    } else
-                        throw new PatternSyntaxException("Error parsing regex: no matching opening bracket found.", expression, i);
-                } else // Arbitrary symbol, add it to parsed.
-                    result.add(c);
-            }
+                    popped = true;
+                    i += 1;
+                    break;
+                } else
+                    throw new PatternSyntaxException("Error parsing regex: no matching opening bracket found.", expression, i);
+            } else // Arbitrary symbol, add it to parsed.
+                result.add(c);
         }
         if (!popped)
             throw new PatternSyntaxException("Error parsing regex: no closing bracket found.", expression, i);
@@ -192,13 +184,41 @@ class RegexParser {
     
     private void brace(Integer i, String expression, RegexChunk chunk) throws PatternSyntaxException {
         BigInteger min = ZERO, max = ZERO;
-        
+        boolean popped = false, toMax = false;
+        for (; i < expression.length(); i++) {
+            if (Arrays.binarySearch(numbers, expression.charAt(i)) > 0) // Is it a number?
+                if (!toMax)
+                    min = min.multiply(TEN).add(BigInteger.valueOf(Long.valueOf(expression.charAt(i))));
+                else
+                    max = max.multiply(TEN).add(BigInteger.valueOf(Long.valueOf(expression.charAt(i))));
+            else if (Arrays.binarySearch(symbols, expression.charAt(i)) > 0) { // Is it a symbol?
+                switch(expression.charAt(i)) {
+                    case '}' -> {
+                        popped = true;
+                        i++;
+                        break;
+                    }
+                    case ',' -> {
+                        toMax = true;
+                    }
+                    default -> throw new PatternSyntaxException("Error while parsing regex: Unexpected symbol inside braces.", expression, i);
+                }
+            }
+            else // Unknown, throw error.
+                throw new PatternSyntaxException("Error while parsing regex: Unexpected symbol inside braces.", expression, i);
+        }
+        if (!popped)
+            throw new PatternSyntaxException("Error while parsing regex: Reached end of parse inside braces.", expression, i);
+        else
+            if (max.equals(ZERO)) // Only found one number, not two separated by a comma.
+                chunk.setMaximumNumberToFetch(min);
+            else
+                chunk.setMinMaxNumberToFetch(min, max);
     }
     
     
     RegexParser(String newRegex) throws PatternSyntaxException {
         parsedRegex = new RegexChunk();
-        openSymbols = new Stack<>();
         stringGenerator = new Generex(newRegex, new Random());
     }
     
