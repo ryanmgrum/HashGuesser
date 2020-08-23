@@ -8,7 +8,6 @@ import static java.math.BigInteger.TEN;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.Random;
-import java.util.Stack;
 
 /**@author Ryan McAllister-Grum
  */
@@ -34,8 +33,7 @@ class RegexParser {
      */
     private static final char[] lowercaseLetters = new char[]{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
     private static final char[] uppercaseLetters = new char[]{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
-    // I do not think these symbols are in order, need to verify.
-    private static final char[] symbols = new char[]{'!', '@', '#', '%', '&', '/', '-', '_', '|', ' ', '"', ';', ':', '<', '>', '`', '~'};
+    private static final char[] symbols = new char[]{' ', '!', '"', '#', '%', '&', ',', '-', '/', ':', ';', '<', '>', '@', '[', ']', '_', '`', '{', '|', '}', '~'};
     private static final char[] numbers = new char[]{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
     
     
@@ -43,53 +41,97 @@ class RegexParser {
         parsedRegex.reset();
         RegexChunk chunk = new RegexChunk();
         parsedRegex.setNext(chunk);
-        for (Integer i = 0; i < expression.length(); i++) {
+        for (int i = 0; i < expression.length(); i++) {
             char c = expression.charAt(i);
             switch(c) {
                 case '(' -> {
-                    parenthesis(++i, expression);
+                    if (chunk.getLetter() == null && chunk.getSequence() == null && chunk.getPeers() == null) {
+                        chunk = parenthesis(++i, expression);
+                    } else {
+                        RegexChunk next = parenthesis(++i, expression);
+                        chunk.setNext(next);
+                        next.setPrev(chunk);
+                        chunk = chunk.next();
+                    }
+                    i = expression.indexOf(")", i);
                 }
                 case '[' -> {
-                    bracket(++i, expression);
+                    if (chunk.getLetter() == null && chunk.getSequence() == null && chunk.getPeers() == null) {
+                        chunk.addSequence(bracket(++i, expression));
+                        i = expression.indexOf("]", i);
+                    } else {
+                        RegexChunk prev = chunk;
+                        chunk.setNext(new RegexChunk());
+                        chunk = chunk.next();
+                        chunk.setPrev(prev);
+                        i = expression.indexOf("]", i);
+                    }
                 }
                 case '{' -> {
+                    if (chunk.getLetter() == null && chunk.getSequence() == null && chunk.getPeers() == null)
+                        throw new PatternSyntaxException("Error parsing regex: braces on an empty expression.", expression, i);
                     brace(++i, expression, chunk);
+                    i = expression.indexOf("}", i);
                 }
                 default -> {
-                    RegexChunk chk = new RegexChunk(expression.charAt(i));
-                    chunk.setNext(chk);
-                    chunk = chunk.next();
+                    if (chunk.getLetter() == null && chunk.getSequence() == null && chunk.getPeers() == null)
+                        chunk.setLetter(expression.charAt(i));
+                    else {
+                        RegexChunk prev = chunk;
+                        chunk.setNext(new RegexChunk(expression.charAt(i)));
+                        chunk = chunk.next();
+                        chunk.setPrev(prev);
+                    }
                 }
             }
         }
+        // Rewind chunk
+        while (chunk.hasPrev())
+            chunk = chunk.prev();
+        // Set parsedRegex again in case its chunk got lost.
+        parsedRegex.setNext(chunk);
     }
     
     
-    private RegexChunk parenthesis(Integer i, String expression) throws PatternSyntaxException {
+    private RegexChunk parenthesis(int i, String expression) throws PatternSyntaxException {
         RegexChunk result = new RegexChunk();
         RegexChunk chunk = new RegexChunk();
         result.addPeer(chunk);
         boolean popped = false;
-        for (; i < expression.length(); i++) {
+        for (; i < expression.length() && !popped; i++) {
             char c = expression.charAt(i);
             switch(c) {
                 case '|' -> {
-                    RegexChunk chk = new RegexChunk();
-                    chunk.setNext(chk);
+                    RegexChunk prev = chunk;
+                    chunk.setNext(new RegexChunk());
                     chunk = chunk.next();
+                    chunk.setPrev(prev);
                 }
                 case '}' -> throw new PatternSyntaxException("Error parsing regex: unescaped closing brace found inside parenthesis.", expression, i);
                 case ']' -> throw new PatternSyntaxException("Error parsing regex: unescaped closing bracket found inside parenthesis.", expression, i);
                 case '[' -> {
-                    chunk.addSequence(bracket(++i, expression));
+                    if (chunk.getLetter() == null && chunk.getSequence() == null && chunk.getPeers() == null) {
+                        chunk.addSequence(bracket(++i, expression));
+                        i = expression.indexOf("]", i);
+                    } else {
+                        chunk.addPeer(new RegexChunk(bracket(++i, expression)));
+                        i = expression.indexOf("]", i);
+                    }
                 }
                 case '{' -> {
-                    brace(++i, expression, chunk);
+                    if (chunk.getPeers() != null)
+                        if (!chunk.getPeers().isEmpty())
+                            brace(++i, expression, chunk.getPeers().peekLast());
+                    else
+                        brace(++i, expression, chunk);
+                    i = expression.indexOf("}", i);
                 }
-                case ')' -> {
-                    popped = true;
-                    i++;
-                    break;
+                case ')' -> popped = true;
+                default -> {
+                    if (chunk.getLetter() == null && chunk.getSequence() == null)
+                        chunk.setLetter(expression.charAt(i));
+                    else
+                        chunk.addPeer(new RegexChunk(expression.charAt(i)));
                 }
             }
         }
@@ -100,10 +142,10 @@ class RegexParser {
     }
     
     // This is where ranges come into play.
-    private LinkedList<Character> bracket(Integer i, String expression) throws PatternSyntaxException {
+    private LinkedList<Character> bracket(int i, String expression) throws PatternSyntaxException {
         LinkedList<Character> result = new LinkedList<>();
         boolean popped = false;
-        for(; i < expression.length(); i++) {
+        for(; i < expression.length() && !popped; i++) {
             char c = expression.charAt(i);
             if (Arrays.binarySearch(numbers, c) >= 0) { // Is it a number?
                 if (i+1 < expression.length() && i+2 < expression.length()) {
@@ -116,7 +158,7 @@ class RegexParser {
                             else
                                 for (; c >= upper; c--)
                                     result.add(c);
-                            i = i + 2;
+                            i += 2;
                         } else
                             throw new PatternSyntaxException("Error parsing regex: unknown range (numbers, lowercase letters, or uppercase letters).", expression, i);
                     } else // Not a sequence, add the number.
@@ -136,7 +178,7 @@ class RegexParser {
                             else
                                 for (; c >= upper; c--)
                                     result.add(c);
-                            i = i + 2;
+                            i += 2;
                         } else
                             throw new PatternSyntaxException("Error parsing regex: unknown range (numbers, lowercase letters, or uppercase letters).", expression, i);
                     } else // Not a sequence, add the letter.
@@ -156,7 +198,7 @@ class RegexParser {
                             else
                                 for (; c >= upper; c--)
                                     result.add(c);
-                            i = i + 2;
+                            i += 2;
                         } else
                             throw new PatternSyntaxException("Error parsing regex: unknown range (numbers, lowercase letters, or uppercase letters).", expression, i);
                     } else // Not a sequence, add the letter.
@@ -166,11 +208,9 @@ class RegexParser {
                 else // we are at the end of the expression inside a bracket, error.
                     throw new PatternSyntaxException("Error parsing regex: no closing bracket found.", expression, i);                    
             } else if (Arrays.binarySearch(symbols, c) >= 0) { // Is it a symbol?
-                if (c == ']') { // Exit
+                if (c == ']') // Exit
                     popped = true;
-                    i += 1;
-                    break;
-                } else
+                else
                     throw new PatternSyntaxException("Error parsing regex: no matching opening bracket found.", expression, i);
             } else // Arbitrary symbol, add it to parsed.
                 result.add(c);
@@ -182,25 +222,20 @@ class RegexParser {
     }
     
     
-    private void brace(Integer i, String expression, RegexChunk chunk) throws PatternSyntaxException {
+    private void brace(int i, String expression, RegexChunk chunk) throws PatternSyntaxException {
         BigInteger min = ZERO, max = ZERO;
         boolean popped = false, toMax = false;
-        for (; i < expression.length(); i++) {
-            if (Arrays.binarySearch(numbers, expression.charAt(i)) > 0) // Is it a number?
+        for (; i < expression.length() && !popped; i++) {
+            char c = expression.charAt(i);
+            if (Arrays.binarySearch(numbers, c) > 0) // Is it a number?
                 if (!toMax)
-                    min = min.multiply(TEN).add(BigInteger.valueOf(Long.valueOf(expression.charAt(i))));
+                    min = min.multiply(TEN).add(new BigInteger(expression.substring(i, i+1)));
                 else
-                    max = max.multiply(TEN).add(BigInteger.valueOf(Long.valueOf(expression.charAt(i))));
-            else if (Arrays.binarySearch(symbols, expression.charAt(i)) > 0) { // Is it a symbol?
+                    max = max.multiply(TEN).add(new BigInteger(expression.substring(i, i+1)));
+            else if (Arrays.binarySearch(symbols, c) > 0) { // Is it a symbol?
                 switch(expression.charAt(i)) {
-                    case '}' -> {
-                        popped = true;
-                        i++;
-                        break;
-                    }
-                    case ',' -> {
-                        toMax = true;
-                    }
+                    case '}' -> popped = true;
+                    case ',' -> toMax = true;
                     default -> throw new PatternSyntaxException("Error while parsing regex: Unexpected symbol inside braces.", expression, i);
                 }
             }
@@ -211,14 +246,14 @@ class RegexParser {
             throw new PatternSyntaxException("Error while parsing regex: Reached end of parse inside braces.", expression, i);
         else
             if (max.equals(ZERO)) // Only found one number, not two separated by a comma.
-                chunk.setMaximumNumberToFetch(min);
+                chunk.setMinimumNumberToFetch(min);
             else
                 chunk.setMinMaxNumberToFetch(min, max);
     }
     
     
     RegexParser(String newRegex) throws PatternSyntaxException {
-        parsedRegex = new RegexChunk();
+        parsedRegex = null; // Will use it after I implement outputting a random and in-order lexicographical sequence.
         stringGenerator = new Generex(newRegex, new Random());
     }
     
@@ -240,64 +275,82 @@ class RegexParser {
     //}
 
     private class RegexChunk {
-        private char letter;
+        private Character letter;
         private BigInteger minimumNumberToFetch;
         private BigInteger maximumNumberToFetch;
         private LinkedList<Character> sequence;
         private RegexChunk next;
+        private RegexChunk prev;
         private LinkedList<RegexChunk> peers;
         
         protected RegexChunk() {
-            sequence = new LinkedList<>();
+            letter = null;
+            sequence = null;
             next = null;
-            peers = new LinkedList<>();
-            minimumNumberToFetch = ZERO;
-            maximumNumberToFetch = ZERO;
+            prev = null;
+            peers = null;
+            minimumNumberToFetch = null;
+            maximumNumberToFetch = null;
         }
         
         protected RegexChunk(Character ch) {
             letter = ch;
             sequence = null;
             next = null;
+            prev = null;
             peers = null;
-            minimumNumberToFetch = ZERO;
-            maximumNumberToFetch = ZERO;
+            minimumNumberToFetch = null;
+            maximumNumberToFetch = null;
         }
         
-        protected RegexChunk(RegexChunk nextChunkChain) {
+        protected RegexChunk(RegexChunk nextChunk) {
+            letter = null;
             sequence = null;
-            next = nextChunkChain;
+            next = nextChunk;
+            prev = null;
             peers = null;
-            minimumNumberToFetch = ZERO;
-            maximumNumberToFetch = ZERO;
+            minimumNumberToFetch = null;
+            maximumNumberToFetch = null;
         }
         
         protected RegexChunk(LinkedList charactersOrPeer) {
+            letter = null;
             if (charactersOrPeer.get(0) instanceof Character)
                 sequence = charactersOrPeer;
             else
                 sequence = null;
+            next = null;
+            prev = null;
             if (charactersOrPeer.get(0) instanceof RegexChunk)
                 peers = charactersOrPeer;
             else
                 peers = null;
-            minimumNumberToFetch = ZERO;
-            maximumNumberToFetch = ZERO;
+            minimumNumberToFetch = null;
+            maximumNumberToFetch = null;
         }
         
+        protected void setMinimumNumberToFetch(BigInteger min) {
+            minimumNumberToFetch = min;
+        }
         
         protected void setMaximumNumberToFetch(BigInteger max) {
-            if (max != null)
-                if (max.compareTo(ZERO) > 0)
-                    minimumNumberToFetch = max;
+            maximumNumberToFetch = max;
         }
         
         protected void setMinMaxNumberToFetch(BigInteger min, BigInteger max) {
             if (min != null && max != null)
                 if (min.compareTo(ZERO) > 0 && max.compareTo(min) > 0) {
-                        minimumNumberToFetch = min;
-                        maximumNumberToFetch = max;
+                    minimumNumberToFetch = min;
+                    maximumNumberToFetch = max;
                 }
+        }
+        
+        protected BigInteger getMinNumberToFetch() {
+            return minimumNumberToFetch;
+        }
+        
+        protected BigInteger getMaxNumberToFetch() {
+            return maximumNumberToFetch;
         }
         
         protected void setNext(RegexChunk nextChunk) {
@@ -312,14 +365,30 @@ class RegexParser {
             return next;
         }
         
-        protected void addCharacter(char c) {
+        protected void setPrev(RegexChunk prevChunk) {
+            prev = prevChunk;
+        }
+        
+        protected boolean hasPrev() {
+            return prev != null;
+        }
+        
+        protected RegexChunk prev() {
+            return prev;
+        }
+        
+        protected void addToSequence(char c) {
             if (sequence == null)
                 sequence = new LinkedList<>();
             sequence.add(c);
         }
         
-        protected char getCharacter() {
+        protected Character getLetter() {
             return letter;
+        }
+        
+        protected void setLetter(char newLetter) {
+            letter = newLetter;
         }
         
         protected void addSequence(LinkedList<Character> chars) {
@@ -344,9 +413,26 @@ class RegexParser {
         }
         
         protected void reset() {
+            next = null;
+            prev = null;
             if (peers != null)
                 peers.clear();
-            next = null;
+            peers = null;
+            if (sequence != null)
+                sequence.clear();
+            sequence = null;
+            minimumNumberToFetch = null;
+            maximumNumberToFetch = null;
+        }
+    }
+    
+    
+    public static void main(String[] args) {
+        try {
+            RegexParser parser = new RegexParser("([1-9]|1[0-9]|2[0-5])-(ab[c-f]{3,4}|de[j-m]{2}){6}");
+            System.out.println("Done!");
+        } catch (PatternSyntaxException e) {
+            System.err.println(e);
         }
     }
 }
