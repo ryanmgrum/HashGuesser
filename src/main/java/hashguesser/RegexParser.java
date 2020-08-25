@@ -8,6 +8,7 @@ import static java.math.BigInteger.TEN;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.Random;
+import java.util.TreeSet;
 
 /**@author Ryan McAllister-Grum
  */
@@ -142,8 +143,8 @@ class RegexParser {
     }
     
     // This is where ranges come into play.
-    private LinkedList<Character> bracket(int i, String expression) throws PatternSyntaxException {
-        LinkedList<Character> result = new LinkedList<>();
+    private TreeSet<Character> bracket(int i, String expression) throws PatternSyntaxException {
+        TreeSet<Character> result = new TreeSet<>();
         boolean popped = false;
         for(; i < expression.length() && !popped; i++) {
             char c = expression.charAt(i);
@@ -278,7 +279,7 @@ class RegexParser {
         private Character letter;
         private BigInteger minimumNumberToFetch;
         private BigInteger maximumNumberToFetch;
-        private LinkedList<Character> sequence;
+        private TreeSet<Character> sequence;
         private RegexChunk next;
         private RegexChunk prev;
         private LinkedList<RegexChunk> peers;
@@ -313,18 +314,22 @@ class RegexParser {
             maximumNumberToFetch = null;
         }
         
-        protected RegexChunk(LinkedList charactersOrPeer) {
+        protected RegexChunk(LinkedList peer) {
             letter = null;
-            if (charactersOrPeer.get(0) instanceof Character)
-                sequence = charactersOrPeer;
-            else
-                sequence = null;
+            sequence = null;
             next = null;
             prev = null;
-            if (charactersOrPeer.get(0) instanceof RegexChunk)
-                peers = charactersOrPeer;
-            else
-                peers = null;
+            peers = peer;
+            minimumNumberToFetch = null;
+            maximumNumberToFetch = null;
+        }
+        
+        protected RegexChunk(TreeSet newSequence) {
+            letter = null;
+            sequence = newSequence;
+            next = null;
+            prev = null;
+            peers = null;
             minimumNumberToFetch = null;
             maximumNumberToFetch = null;
         }
@@ -379,7 +384,7 @@ class RegexParser {
         
         protected void addToSequence(char c) {
             if (sequence == null)
-                sequence = new LinkedList<>();
+                sequence = new TreeSet<>();
             sequence.add(c);
         }
         
@@ -391,14 +396,14 @@ class RegexParser {
             letter = newLetter;
         }
         
-        protected void addSequence(LinkedList<Character> chars) {
+        protected void addSequence(TreeSet<Character> chars) {
             if (sequence == null)
-                sequence = new LinkedList<>();
+                sequence = new TreeSet<>();
             for (Character chara : chars)
                 sequence.add(chara);
         }
         
-        protected LinkedList<Character> getSequence() {
+        protected TreeSet<Character> getSequence() {
             return sequence;
         }
         
